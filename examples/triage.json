@@ -1,0 +1,12 @@
+{
+  "name": "triage",
+  "initial": "open",
+  "terminal": ["done", "abandoned"],
+  "transitions": [
+    {"step": "claim",   "from": "open",       "to": "claimed"},
+    {"step": "work",    "from": "claimed",    "to": "in-progress"},
+    {"step": "finish",  "from": "in-progress", "to": "done"},
+    {"step": "abandon", "from": "claimed",    "to": "abandoned"},
+    {"step": "abandon", "from": "in-progress", "to": "abandoned"}
+  ]
+}

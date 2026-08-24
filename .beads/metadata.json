@@ -1,0 +1,5 @@
+{
+  "project_id": "shuttle",
+  "storage": "jsonl-only",
+  "note": "No Dolt. .beads/issues.jsonl IS the tracker."
+}
