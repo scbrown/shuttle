@@ -4,7 +4,7 @@
 > full vertical slice.** Pure state machine (`shuttle/model.py`), append-only
 > JSONL outbox with a forward-only export watermark (`state.py`), per-agent
 > ed25519 signing in quipu's `signing.rs` custody shape (`signing.py`),
-> `/episode`-only quipu client with the shantytown error discipline and the
+> a quipu client riding `/knot`'s strict graph lane, with the shantytown error discipline and the
 > `GET /graphs` capability probe (`quipu_client.py`), the camayoc window
 > scheme + `urn:shuttle:dataset:open` maintenance (`windows.py`), signed
 > Turtle export with pre-export self-verification (`export.py`), and the
