@@ -9,7 +9,11 @@
 > scheme + `urn:shuttle:dataset:open` maintenance (`windows.py`), signed
 > Turtle export with pre-export self-verification (`export.py`), and the
 > whole surface as `shuttle` subcommands (`cli.py`). 27 unit tests; the
-> cross-repo acceptance is `scripts/e2e_slice.sh`.
+> cross-repo acceptance `scripts/e2e_slice.sh` **passes against quipu main
+> (2026-08-24)**: keys → human registration → define → start → three signed
+> advances → export → hot query + verify → freeze → identical rows via the
+> frozen dataset and `include_kinds` → signatures verifying against the
+> frozen window.
 > Deliberately NOT built (v1 deferrals, on the tracker): an HTTP/MCP
 > server (agents invoke the CLI; quipu is the meeting point), quipu
 > write-gate signature enforcement (quipu-8cc — unverifiable transitions
