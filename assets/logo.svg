@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 200" role="img" aria-label="Shuttle logo — a weaving shuttle carrying a red weft thread through vertical warp threads">
+  <!-- warp: vertical threads the shuttle passes through -->
+  <g stroke-width="4" stroke-linecap="round">
+    <line x1="35"  y1="18" x2="35"  y2="182" stroke="#3E5C6E"/>
+    <line x1="65"  y1="18" x2="65"  y2="182" stroke="#C9A227"/>
+    <line x1="95"  y1="18" x2="95"  y2="182" stroke="#3E5C6E"/>
+    <line x1="125" y1="18" x2="125" y2="182" stroke="#C9A227"/>
+    <line x1="155" y1="18" x2="155" y2="182" stroke="#3E5C6E"/>
+    <line x1="185" y1="18" x2="185" y2="182" stroke="#C9A227"/>
+  </g>
+  <!-- weft thread trailing behind the shuttle, woven over/under -->
+  <path d="M12 100 Q 35 88 50 100 T 95 100 T 140 100" fill="none" stroke="#B3422E" stroke-width="4.5" stroke-linecap="round"/>
+  <!-- the shuttle: boat/leaf shape, walnut, pointed both ends -->
+  <g>
+    <path d="M60 100 Q 110 74 176 100 Q 110 126 60 100 Z" fill="#6B4F35" stroke="#2A241D" stroke-width="3.5"/>
+    <!-- bobbin window in the shuttle -->
+    <ellipse cx="118" cy="100" rx="26" ry="10" fill="#F6F1E7" stroke="#2A241D" stroke-width="2.5"/>
+    <!-- thread spool inside -->
+    <rect x="104" y="95" width="28" height="10" rx="4" fill="#B3422E"/>
+    <line x1="108" y1="97.5" x2="128" y2="97.5" stroke="#8F3323" stroke-width="1.5"/>
+    <line x1="108" y1="102.5" x2="128" y2="102.5" stroke="#8F3323" stroke-width="1.5"/>
+    <!-- eyelet at the tip where the weft exits -->
+    <circle cx="70" cy="100" r="3.5" fill="#F6F1E7" stroke="#2A241D" stroke-width="2"/>
+  </g>
+  <!-- signature seal: a small knot stamped on each completed pass -->
+  <circle cx="176" cy="140" r="9" fill="none" stroke="#B3422E" stroke-width="3"/>
+  <circle cx="176" cy="140" r="3" fill="#B3422E"/>
+</svg>
