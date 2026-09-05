@@ -1,0 +1,44 @@
+name: ci
+
+# The release lane builds from a tag and publishes an artifact the fleet
+# installs unattended. That is only safe if main is already known-good, so
+# the same suite runs on every push and pull request.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor is pyproject's requires-python; the ceiling is what the
+        # fleet actually runs. Both are tested because a release is installed
+        # on whichever it finds.
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+      - name: Compile every source file
+        run: python -m py_compile shuttle/*.py tests/*.py
+      - name: Unit suite
+        run: python -m unittest discover -s tests -v
+      - name: The version command answers (the deploy interface)
+        run: |
+          set -euo pipefail
+          line="$(shuttle version)"
+          echo "$line"
+          # Field 2 is what the deploy actuator parses. Assert the shape here
+          # so a change to it fails in CI rather than in an unattended deploy.
+          test "$(printf '%s' "$line" | awk '{print $1}')" = "shuttle"
+          test -n "$(printf '%s' "$line" | awk '{print $2}')"

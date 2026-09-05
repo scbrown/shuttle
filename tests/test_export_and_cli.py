@@ -260,5 +260,47 @@ class WindowSchemeTests(unittest.TestCase):
                 windows.window_iri(bad)
 
 
+class VersionContractTests(unittest.TestCase):
+    """`shuttle version` is a deploy interface, not a convenience.
+
+    scripts/deploy-shuttle-cli.sh (in the operator repo) resolves both the
+    running build and the candidate build by parsing field 2 of this line, and
+    refuses to promote a candidate whose reported version disagrees with the
+    release it was downloaded from. So the OUTPUT SHAPE is load-bearing:
+    changing it silently disarms the promotion gate rather than breaking it
+    loudly. These tests exist to make that change loud.
+    """
+
+    def test_version_prints_one_parseable_line(self):
+        import shuttle
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = cli.main(["version"])
+        self.assertEqual(rc, 0)
+        line = buf.getvalue().strip()
+        self.assertEqual(line, f"shuttle {shuttle.__version__}")
+        # Field 2 is what the actuator reads; keep it a bare version.
+        self.assertEqual(line.split()[1], shuttle.__version__)
+        self.assertEqual(len(line.splitlines()), 1)
+
+    def test_package_version_matches_installed_metadata_when_installed(self):
+        """The wheel's version is single-sourced from shuttle.__version__.
+
+        When shuttle is installed (the case that matters for a deploy), the
+        distribution metadata and the attribute must agree -- a disagreement
+        means the release lane could tag a version the binary denies being.
+        Skipped in a bare source tree, where there is no metadata to compare.
+        """
+        import shuttle
+        from importlib import metadata
+
+        try:
+            dist_version = metadata.version("shuttle")
+        except metadata.PackageNotFoundError:
+            self.skipTest("shuttle is not installed; nothing to cross-check")
+        self.assertEqual(dist_version, shuttle.__version__)
+
+
 if __name__ == "__main__":
     unittest.main()

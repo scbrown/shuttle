@@ -1,0 +1,87 @@
+name: release
+
+# The release lane (aegis-7wjd02).
+#
+# Before this existed, shuttle reached the host it runs on exactly once, by
+# hand: `pipx install --force` from a personal worktree. Nothing re-asserted
+# it after a venv rebuild, nothing carried it to a second host, and nothing
+# noticed when the installed build drifted from main. shuttle's whole purpose
+# is that an operational record is a signed fact rather than a claim in prose,
+# so its own deployment being a claim in prose was the sharpest gap it had.
+#
+# This half publishes a verifiable artifact. The other half -- an unattended
+# actuator that checksum-verifies, command-tests and atomically promotes it --
+# lives in the operator repo. Order matters: propagation shipped first would
+# test green against an artifact that does not exist.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build
+
+      - name: Refuse a tag that disagrees with the package
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(python -c 'import shuttle; print(shuttle.__version__)')"
+          echo "tag=$tag package=$pkg"
+          if [ "$tag" != "$pkg" ]; then
+            echo "REFUSING: tag v$tag does not match shuttle.__version__ ($pkg)." >&2
+            echo "The version is single-sourced from shuttle/__init__.py; bump it" >&2
+            echo "and re-tag rather than publishing an artifact that misreports itself." >&2
+            exit 1
+          fi
+
+      - name: Test what is about to be published
+        run: |
+          python -m pip install -e .
+          python -m py_compile shuttle/*.py tests/*.py
+          python -m unittest discover -s tests -v
+
+      - name: Build wheel and sdist
+        run: python -m build --outdir dist .
+
+      - name: The built wheel reports the tagged version
+        # Built, installed clean, and asked -- not merely assumed from the
+        # filename. This is the same question the deploy actuator asks the
+        # candidate before promoting it; asking it here means a bad artifact
+        # never reaches a release in the first place.
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet dist/shuttle-*.whl
+          got="$(/tmp/verify/bin/shuttle version | awk '{print $2}')"
+          echo "installed wheel reports: $got"
+          test "$got" = "$tag"
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum shuttle-*.whl shuttle-*.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "shuttle $GITHUB_REF_NAME" \
+            --generate-notes \
+            dist/shuttle-*.whl dist/shuttle-*.tar.gz dist/checksums.txt

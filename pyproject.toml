@@ -1,6 +1,9 @@
 [project]
 name = "shuttle"
-version = "0.1.0"
+# Single-sourced from shuttle/__init__.py so a release tag, the built
+# wheel and `shuttle version` cannot disagree. The release lane refuses a
+# tag that does not match this.
+dynamic = ["version"]
 description = "The workflow engine of the quipu stack: signed, append-only runs exported into windowed operational graphs"
 requires-python = ">=3.11"
 # The ONE dependency, for ed25519 only — a documented exception to the
@@ -16,3 +19,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["shuttle"]
+
+[tool.setuptools.dynamic]
+version = {attr = "shuttle.__version__"}

@@ -15,6 +15,7 @@ import json
 import sys
 from pathlib import Path
 
+from . import __version__
 from . import export as export_mod
 from . import model, quipu_client as qc, signing, state, windows
 
@@ -285,9 +286,30 @@ def cmd_freeze_window(args) -> int:
     return 0
 
 
+def cmd_version(args) -> int:
+    """Print the installed version.
+
+    A deploy actuator has exactly one way to ask an installed build what it is,
+    and it is this. Without it a promotion gate cannot compare the candidate
+    against the release it claims to be, cannot read back what it just
+    installed, and cannot tell a stale install from a current one -- so the
+    deploy lane degrades to "the file changed", which is what hand-installing
+    already gives you. Keep the output one line, `shuttle <version>`: the
+    actuator reads field 2.
+    """
+    print(f"shuttle {__version__}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="shuttle", description=__doc__)
+    ap.add_argument(
+        "-V", "--version", action="version", version=f"shuttle {__version__}"
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    ver = sub.add_parser("version", help="print the installed version")
+    ver.set_defaults(fn=cmd_version)
 
     k = sub.add_parser("keys", help="key management")
     ksub = k.add_subparsers(dest="keys_cmd", required=True)
