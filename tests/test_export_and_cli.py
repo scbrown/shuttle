@@ -284,22 +284,19 @@ class VersionContractTests(unittest.TestCase):
         self.assertEqual(line.split()[1], shuttle.__version__)
         self.assertEqual(len(line.splitlines()), 1)
 
-    def test_package_version_matches_installed_metadata_when_installed(self):
-        """The wheel's version is single-sourced from shuttle.__version__.
+    # There is deliberately NO test here cross-checking shuttle.__version__
+    # against importlib.metadata. One was written and removed the same hour:
+    # in a source tree it resolves a stale `shuttle.egg-info/`, so it compares
+    # the working tree against whenever the tree was last built and fails on a
+    # version bump for a reason that has nothing to do with the bump. It passed
+    # in CI only because `pip install -e .` regenerates that metadata first --
+    # green where the invariant is unnecessary, red where it is merely stale.
+    #
+    # The invariant is real, so it is asserted where it can be asserted
+    # honestly: the release lane builds the wheel, installs it into a clean
+    # venv, and asks it its version. That is the artifact anyone actually
+    # deploys, and a mismatch there blocks the release.
 
-        When shuttle is installed (the case that matters for a deploy), the
-        distribution metadata and the attribute must agree -- a disagreement
-        means the release lane could tag a version the binary denies being.
-        Skipped in a bare source tree, where there is no metadata to compare.
-        """
-        import shuttle
-        from importlib import metadata
-
-        try:
-            dist_version = metadata.version("shuttle")
-        except metadata.PackageNotFoundError:
-            self.skipTest("shuttle is not installed; nothing to cross-check")
-        self.assertEqual(dist_version, shuttle.__version__)
 
 
 if __name__ == "__main__":
