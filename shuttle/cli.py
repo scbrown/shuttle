@@ -166,12 +166,29 @@ def cmd_status(args) -> int:
 
 def cmd_export(args) -> int:
     qc.probe_graph_kinds()  # capability first: cannot-tell beats zero rows
-    summary = export_mod.export()
+    summary = export_mod.export(strict=getattr(args, "strict", False))
     print(
         f"exported {summary['exported']} of {summary['total']} records "
         f"(windows: {', '.join(summary['windows']) or 'none'})"
     )
-    return 0
+    skipped = summary.get("quarantined") or []
+    if not skipped:
+        return 0
+    # A skip that only appears in a summary nobody reads is silent loss, and
+    # silent loss in the record of what ran is the whole failure this tool
+    # exists to prevent. Say it on stderr and exit nonzero.
+    print(
+        f"shuttle: QUARANTINED {len(skipped)} record(s) — exported the rest, "
+        f"logged to the state directory:",
+        file=sys.stderr,
+    )
+    for entry in skipped:
+        print(
+            f"  seq {entry['seq']} {entry.get('type')} "
+            f"{entry.get('run')}: {entry['error']}",
+            file=sys.stderr,
+        )
+    return 1
 
 
 def cmd_verify(args) -> int:
@@ -303,6 +320,14 @@ def main(argv: list[str] | None = None) -> int:
     st.set_defaults(fn=cmd_status)
 
     e = sub.add_parser("export", help="drain the log into quipu windows")
+    e.add_argument(
+        "--strict",
+        action="store_true",
+        help=(
+            "stop at the first record that cannot be posted, leaving it and "
+            "everything after it unexported (the pre-quarantine behaviour)"
+        ),
+    )
     e.set_defaults(fn=cmd_export)
 
     v = sub.add_parser("verify", help="re-verify a run's signatures from the graph")

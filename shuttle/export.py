@@ -100,6 +100,30 @@ def transition_turtle(rec: dict, seq: int) -> str:
     )
 
 
+def _definitions_by_name(recs: list[dict]) -> dict[str, dict]:
+    """Every workflow definition in the log, latest wins.
+
+    Read from the WHOLE log rather than from the unexported tail: a
+    definition is recorded once, months before the runs that reference it,
+    and by then it is long past the watermark.
+    """
+    out: dict[str, dict] = {}
+    for rec in recs:
+        if rec.get("type") == "define":
+            out[rec["name"]] = rec
+    return out
+
+
+def _workflow_of(rec: dict) -> str | None:
+    """The workflow a record asserts `aegis:runOf` against, if any."""
+    kind = rec.get("type")
+    if kind in ("start", "transition"):
+        return rec.get("definition")
+    if kind == "define":
+        return rec.get("name")
+    return None
+
+
 def _knot_for(rec: dict, seq: int) -> dict:
     """The `/knot` body one log record earns: the record's Turtle, targeted
     at its window graph."""
@@ -146,27 +170,117 @@ def verify_own_signature(rec: dict) -> None:
         )
 
 
-def export(root=None) -> dict:
+def export(root=None, strict: bool = False) -> dict:
     """Drain the log past the watermark into quipu. Returns a summary.
 
-    Per record: ensure the window (idempotent), post the episode, advance
-    the watermark by exactly one. A failure stops the drain with the
-    watermark before the failed record, so the retry is the same record.
+    Per record: ensure the window (idempotent), ensure the window DECLARES
+    the workflow the record references, post the episode, advance the
+    watermark by exactly one.
+
+    EACH WINDOW MUST DECLARE THE WORKFLOWS IT REFERENCES.
+    ----------------------------------------------------
+    A `define` record exports into the window of the month it was RECORDED.
+    Runs export into the window of the month they RAN. Those are the same
+    month exactly once — the month a workflow is introduced. Every month
+    afterwards, a run asserts `aegis:runOf` against a workflow that the new
+    window has never heard of, SHACL's class constraint refuses it, and one
+    refusal stops the whole drain.
+
+    That is not hypothetical: every shuttle definition was recorded in
+    2026-08, so at 00:00 on 2026-09-01 every lane stopped exporting at once,
+    and the shared record of 78 apply-lane runs a month went empty while the
+    local log kept accepting advances (aegis-pll3fx). Declaring the three
+    named workflows into the September graph by hand would have fixed it
+    until 2026-10-01.
+
+    So the definition is re-asserted into each window that references it.
+    Quipu is idempotent on identical asserts, so a window that already has it
+    pays one redundant knot per workflow per drain and changes nothing.
+
+    ONE BAD RECORD MUST NOT COST THE WINDOW.
+    ----------------------------------------
+    The watermark is linear, so a record that cannot be posted used to stop
+    the drain with every LATER record — including every healthy one — stuck
+    behind it. By default a failed record is now quarantined and reported,
+    and the drain continues; `strict=True` restores stop-on-first-failure.
+    The quarantine is returned in the summary and written to the state
+    directory, because a skip nobody is told about is silent loss.
     """
     recs = state.records(root)
     start = state.watermark(root)
+    definitions = _definitions_by_name(recs)
     exported = 0
     months: set[str] = set()
+    declared: set[tuple[str, str]] = set()
+    quarantined: list[dict] = []
+
     for seq in range(start, len(recs)):
         rec = recs[seq]
+
+        # OUTSIDE the quarantine, deliberately. An unverifiable signature is
+        # not a bad record to step over — stepping over it would advance the
+        # watermark past an integrity failure and drop it from the record
+        # forever, which is a worse silent loss than the stall the quarantine
+        # exists to prevent. Key drift and a tampered log must still stop the
+        # drain.
         if rec.get("type") == "transition":
             verify_own_signature(rec)
-        body = _knot_for(rec, seq)
-        month = body.pop("_month")
-        if month not in months:
-            windows.ensure_window(month, rec["at"])
-            months.add(month)
-        qc.post("/knot", body)
+
+        try:
+            body = _knot_for(rec, seq)
+            month = body.pop("_month")
+            if month not in months:
+                windows.ensure_window(month, rec["at"])
+                months.add(month)
+
+            name = _workflow_of(rec)
+            if rec.get("type") == "define":
+                # This record already carries the definition turtle; posting it
+                # again below would duplicate the knot.
+                declared.add((month, name))
+            elif name and (month, name) not in declared:
+                definition = definitions.get(name)
+                if definition is None:
+                    raise ExportError(
+                        f"record {seq} references workflow {name!r}, which has "
+                        "no definition anywhere in the log, so no window can "
+                        "declare it. Record one with `shuttle define`."
+                    )
+                qc.post(
+                    "/knot",
+                    {
+                        "turtle": definition_turtle(definition),
+                        "graph": windows.window_iri(month),
+                        "timestamp": rec["at"],
+                        "actor": rec.get("agent", "shuttle"),
+                    },
+                )
+                declared.add((month, name))
+
+            qc.post("/knot", body)
+        except Exception as exc:  # noqa: BLE001 - reported, not swallowed
+            if strict:
+                raise
+            quarantined.append(
+                {
+                    "seq": seq,
+                    "type": rec.get("type"),
+                    "run": rec.get("run") or rec.get("name"),
+                    "at": rec.get("at"),
+                    "error": str(exc),
+                }
+            )
+            state.advance_watermark(seq + 1, root)
+            continue
+
         state.advance_watermark(seq + 1, root)
         exported += 1
-    return {"exported": exported, "total": len(recs), "windows": sorted(months)}
+
+    if quarantined:
+        state.record_quarantine(quarantined, root)
+    return {
+        "exported": exported,
+        "total": len(recs),
+        "windows": sorted(months),
+        "quarantined": quarantined,
+    }

@@ -94,6 +94,42 @@ def watermark(root: Path | None = None) -> int:
         ) from exc
 
 
+def _quarantine_path(root: Path) -> Path:
+    return root / "quarantine.jsonl"
+
+
+def record_quarantine(entries: list[dict], root: Path | None = None) -> Path:
+    """Append records the export skipped, so a skip is never silent.
+
+    The watermark is linear: a record that cannot be posted either stops the
+    drain — taking every healthy record behind it — or is stepped over. Only
+    the second keeps a window flowing, and it is honest only if the step is
+    written down somewhere a person will find it. This file is that place;
+    `export` also returns the same entries in its summary.
+    """
+    root = root or state_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    path = _quarantine_path(root)
+    with path.open("a") as f:
+        for entry in entries:
+            f.write(json.dumps(entry, sort_keys=True) + "\n")
+    return path
+
+
+def quarantine(root: Path | None = None) -> list[dict]:
+    """Every record the export has ever skipped, in append order."""
+    root = root or state_dir()
+    path = _quarantine_path(root)
+    if not path.exists():
+        return []
+    out = []
+    for line in path.open():
+        line = line.strip()
+        if line:
+            out.append(json.loads(line))
+    return out
+
+
 def advance_watermark(count: int, root: Path | None = None) -> None:
     """Move the watermark forward to `count`. Refuses to move backward —
     a shrinking watermark re-exports at best and masks loss at worst."""

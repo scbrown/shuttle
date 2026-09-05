@@ -107,17 +107,119 @@ class CliFlowTests(EnvIsolatedCase):
         self.assertEqual(0, code)
         self.assertIn("exported 4 of 4", out)
         knots = [b for p, b in self.posts if p == "/knot"]
-        self.assertEqual(4, len(knots))
+        # Five knots for four records: the run started in a different month
+        # from the one the workflow was defined in, so the run's window gets
+        # the definition re-asserted into it. Without that the window does not
+        # declare the workflow its runs point at, and SHACL refuses the lot.
+        self.assertEqual(5, len(knots))
         # Every episode targets the START month's window, so a frozen window
         # never splits a run.
         for kn in knots[1:]:
             self.assertIn("2026-08", kn["graph"])
+        # The property that matters, asserted directly rather than via a count:
+        # the run's window declares the workflow the run is `runOf`.
+        run_window = [kn for kn in knots if "2026-08" in kn["graph"]]
+        self.assertTrue(
+            any(
+                "a aegis:WorkflowDefinition" in kn["turtle"]
+                and "urn:shuttle:workflow:triage" in kn["turtle"]
+                for kn in run_window
+            ),
+            "the run's window must declare its workflow",
+        )
         self.assertEqual(4, state.watermark(Path(self._state.name)))
 
         # A second export is a no-op — at-least-once, idempotent.
         with mock.patch.object(qc, "probe_graph_kinds", return_value=[]):
             code, out = self.run_cli("export")
         self.assertIn("exported 0 of 4", out)
+
+    def test_a_new_month_declares_the_workflow_it_inherited(self):
+        """THE aegis-pll3fx REGRESSION.
+
+        A workflow is defined once and run for months. The definition exports
+        into the window of the month it was RECORDED; runs export into the
+        window of the month they RAN. Those coincide exactly once — the month
+        the workflow is introduced. Every month after, a run asserted
+        `runOf` against a workflow the new window had never declared, SHACL's
+        class constraint refused it, and one refusal stopped the whole drain.
+
+        Measured consequence: every shuttle definition was recorded in
+        2026-08, so at 00:00 on 2026-09-01 every lane stopped at once and the
+        shared record of ~78 apply-lane runs a month went empty while the local
+        log kept accepting advances.
+        """
+        self.run_cli("define", self._define())
+        # Two runs of the SAME workflow in two different later months.
+        for run, at in (("r-aug", "2026-08-15T00:00:00Z"), ("r-sep", "2026-09-01T00:00:00Z")):
+            self.run_cli("start", "triage", run, "--agent", "agent-a", "--at", at)
+        with mock.patch.object(qc, "probe_graph_kinds", return_value=[]):
+            code, _ = self.run_cli("export")
+        self.assertEqual(0, code)
+
+        knots = [b for p, b in self.posts if p == "/knot"]
+        for month in ("2026-08", "2026-09"):
+            declared = [
+                kn for kn in knots
+                if month in kn["graph"] and "a aegis:WorkflowDefinition" in kn["turtle"]
+            ]
+            self.assertTrue(
+                declared,
+                f"the {month} window must declare the workflow its runs point at",
+            )
+            # Exactly once per window: the definition is re-asserted where it
+            # is needed, not once per record.
+            self.assertEqual(1, len(declared), f"{month} re-declared per record")
+
+    def test_a_record_that_cannot_post_is_quarantined_not_left_blocking(self):
+        """One bad record must not cost the window.
+
+        The watermark is linear, so before the quarantine a record that could
+        not be posted stopped the drain with every LATER record — including
+        every healthy one — stuck behind it. That is how one node from
+        2026-09-01 held five days of every lane.
+        """
+        self.run_cli("define", self._define())
+        for run, at in (("r1", "2026-08-01T00:00:00Z"), ("r2", "2026-08-02T00:00:00Z")):
+            self.run_cli("start", "triage", run, "--agent", "agent-a", "--at", at)
+
+        real_post = qc.post.side_effect
+
+        def refuse_r1(path, body):
+            if path == "/knot" and "run:r1" in body.get("turtle", ""):
+                raise RuntimeError("/knot REFUSED by validation: 1 violation(s)")
+            return real_post(path, body)
+
+        with mock.patch.object(qc, "probe_graph_kinds", return_value=[]), \
+                mock.patch.object(qc, "post", side_effect=refuse_r1):
+            code, out = self.run_cli("export")
+
+        # Nonzero, because a skip nobody is told about is silent loss.
+        self.assertEqual(1, code)
+        # The healthy record behind it still landed.
+        self.assertIn("exported 2 of 3", out)
+        quarantined = state.quarantine(Path(self._state.name))
+        self.assertEqual(1, len(quarantined))
+        self.assertEqual("r1", quarantined[0]["run"])
+        self.assertIn("REFUSED", quarantined[0]["error"])
+        # The watermark cleared the whole log, so the next drain is not stuck.
+        self.assertEqual(3, state.watermark(Path(self._state.name)))
+
+    def test_strict_restores_stop_on_first_failure(self):
+        self.run_cli("define", self._define())
+        self.run_cli("start", "triage", "r1", "--agent", "agent-a",
+                     "--at", "2026-08-01T00:00:00Z")
+        real_post = qc.post.side_effect
+
+        def refuse_all_runs(path, body):
+            if path == "/knot" and "WorkflowRun" in body.get("turtle", ""):
+                raise RuntimeError("nope")
+            return real_post(path, body)
+
+        with mock.patch.object(qc, "probe_graph_kinds", return_value=[]), \
+                mock.patch.object(qc, "post", side_effect=refuse_all_runs):
+            with self.assertRaises(RuntimeError):
+                export.export(Path(self._state.name), strict=True)
 
     def test_export_refuses_a_log_whose_signature_no_longer_verifies(self):
         self.run_cli("define", self._define())
