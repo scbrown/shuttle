@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import __version__
 from . import export as export_mod
-from . import model, quipu_client as qc, signing, state, windows
+from . import model, quipu_client as qc, seeds, signing, state, windows
 
 
 def now_iso() -> str:
@@ -91,7 +91,13 @@ def cmd_define(args) -> int:
         "initial": defn.initial,
         "terminal": list(defn.terminal),
         "transitions": [
-            {"step": t.step, "from": t.from_state, "to": t.to_state}
+            {
+                "step": t.step,
+                "from": t.from_state,
+                "to": t.to_state,
+                **({"seed": t.seed} if t.seed else {}),
+                **({"on_abandon": t.on_abandon} if t.on_abandon else {}),
+            }
             for t in defn.transitions
         ],
         "at": args.at or now_iso(),
@@ -124,31 +130,72 @@ def cmd_start(args) -> int:
     return 0
 
 
+def _advance(defn, run, run_id, current, step, agent, at, evidence=None) -> str:
+    """Validate, sign and append one transition; returns the to-state."""
+    to_state = model.validate_advance(defn, current, step)
+    sig = signing.sign_transition(
+        agent, export_mod.run_iri(run_id), step, current, to_state, at
+    )
+    rec = {
+        "type": "transition",
+        "run": run_id,
+        "definition": run["definition"],
+        "window": run["window"],
+        "step": step,
+        "from": current,
+        "to": to_state,
+        "at": at,
+        "agent": agent,
+        "signature": sig,
+    }
+    if evidence:
+        rec["evidence"] = evidence
+    state.append(rec)
+    terminal = " (terminal)" if to_state in defn.terminal else ""
+    print(f"run '{run_id}': {current} -[{step}]-> {to_state}{terminal}")
+    return to_state
+
+
 def cmd_advance(args) -> int:
     defs, runs = _index()
     defn, run, current = _run_state(defs, runs, args.run)
-    to_state = model.validate_advance(defn, current, args.step)
-    at = args.at or now_iso()
-    sig = signing.sign_transition(
-        args.agent, export_mod.run_iri(args.run), args.step, current, to_state, at
-    )
-    state.append(
-        {
-            "type": "transition",
-            "run": args.run,
-            "definition": run["definition"],
-            "window": run["window"],
-            "step": args.step,
-            "from": current,
-            "to": to_state,
-            "at": at,
-            "agent": args.agent,
-            "signature": sig,
-        }
-    )
-    terminal = " (terminal)" if to_state in defn.terminal else ""
-    print(f"run '{args.run}': {current} -[{args.step}]-> {to_state}{terminal}")
+    _advance(defn, run, args.run, current, args.step, args.agent, args.at or now_iso())
     return 0
+
+
+def cmd_reconcile(args) -> int:
+    """Create the seeds that perform seed steps, and advance each run whose
+    seed has closed (contract C2). Safe to repeat: seeds are keyed by (run,
+    step, visit), and a run only moves from the state its seed was minted in.
+    Exits 1 when any run is FLAGGED, so a timer surfaces it."""
+    flags: list[str] = []
+    with state.locked():
+        defs, runs = _index()
+        targets = [args.run] if args.run else sorted(runs)
+        for run_id in targets:
+            defn, run, current = _run_state(defs, runs, run_id)
+            for _ in range(len(defn.transitions) + 1):  # bounded: one step per state
+                if current in defn.terminal:
+                    break
+                moved = False
+                for t in (t for t in defn.transitions if t.from_state == current and t.seed):
+                    visit = model.entries(defn, run["events"], current)
+                    seed = seeds.show(seeds.ensure_seed(export_mod.run_iri(run_id), t, visit))
+                    step, flag = seeds.decide(seed, t)
+                    print(f"run '{run_id}' step '{t.step}' visit {visit}: seed {seed['id']} {seed.get('status')}")
+                    if flag:
+                        flags.append(f"run '{run_id}': {flag}")
+                    elif step:
+                        at = now_iso()
+                        to_state = _advance(defn, run, run_id, current, step, args.agent, at, seeds.evidence(seed))
+                        run["events"].append(model.Event(run_id, step, current, to_state, at, args.agent))
+                        current, moved = to_state, True
+                        break
+                if not moved:
+                    break
+    for f in flags:
+        print(f"FLAGGED: {f}", file=sys.stderr)
+    return 1 if flags else 0
 
 
 def cmd_status(args) -> int:
@@ -337,6 +384,13 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--at")
     a.set_defaults(fn=cmd_advance)
 
+    rc = sub.add_parser(
+        "reconcile", help="create seeds for seed steps; advance runs whose seed closed"
+    )
+    rc.add_argument("run", nargs="?", help="one run (default: every run)")
+    rc.add_argument("--agent", required=True, help="the agent that signs the advances")
+    rc.set_defaults(fn=cmd_reconcile)
+
     st = sub.add_parser("status", help="run state(s), folded from the log")
     st.add_argument("run", nargs="?")
     st.set_defaults(fn=cmd_status)
@@ -379,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         model.WorkflowError,
         state.StateError,
         signing.SigningError,
+        seeds.SeedsError,
         export_mod.ExportError,
         qc.QuipuUnreachable,
         qc.QuipuWriteRejected,
