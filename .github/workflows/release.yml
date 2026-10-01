@@ -76,6 +76,10 @@ jobs:
           sha256sum shuttle-*.whl shuttle-*.tar.gz > checksums.txt
           cat checksums.txt
 
+      - name: Release notes are the version's changelog section
+        # Fails the release if CHANGELOG.md has no section for this tag.
+        run: python scripts/check-changelog.py --notes "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -83,5 +87,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "shuttle $GITHUB_REF_NAME" \
-            --generate-notes \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             dist/shuttle-*.whl dist/shuttle-*.tar.gz dist/checksums.txt

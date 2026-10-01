@@ -116,15 +116,19 @@ stores its work is sd's own configuration.
 
 ## What runs today
 
-v1 is landed: signed runs, windowed export, freezable history, and the
-cross-repo acceptance passing against a live quipu. What it awaits is a first
-production workload — the engine is built; the loom wants cloth.
+v1 is landed and in production use: signed runs, windowed export, freezable
+history, seed steps, and the cross-repo acceptance passing against a live
+quipu. On the fleet host it carries the ansible apply lane, repo watch and
+stack watch workflows, and an unattended actuator installs each release.
 
 ```bash
 just check    # parse + file-size ratchet
 just test     # check + the unit suite
 just e2e      # the cross-repo acceptance against a live quipu
 ```
+
+Documentation: the [shuttle book](https://scbrown.github.io/shuttle/).
+Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

@@ -1,0 +1,10 @@
+[book]
+title = "shuttle"
+authors = ["scbrown"]
+language = "en"
+src = "docs"
+description = "The workflow engine of the quipu stack: signed, append-only runs exported into windowed operational graphs."
+
+[output.html]
+git-repository-url = "https://github.com/scbrown/shuttle"
+edit-url-template = "https://github.com/scbrown/shuttle/edit/main/{path}"
