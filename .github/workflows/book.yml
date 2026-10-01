@@ -7,10 +7,11 @@ on:
   pull_request:
     paths: ["docs/**", "book.toml", "CHANGELOG.md", ".github/workflows/book.yml"]
 
+# Least privilege: the build job runs `mdbook build` on PR content, so it gets
+# a read-only token. Only the deploy job, which runs on main pushes alone,
+# holds pages:write and id-token:write.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 # The Pages deploy and the PR build checks must NOT share a group. A single
 # `pages` group with cancel-in-progress let any docs PR cancel main's publish,
@@ -26,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      # This job holds pages:write and id-token:write, so nothing it executes may
+      # The deploy job publishes what this job builds, so nothing it executes may
       # be substituted. A pinned TAG is not a pinned ARTIFACT: a release asset can
       # be replaced under an existing tag. The download is written to disk and
       # checked against a pinned sha256 BEFORE anything is extracted or run.
@@ -55,6 +56,9 @@ jobs:
   deploy:
     if: github.event_name == 'push'
     needs: build
+    permissions:
+      pages: write
+      id-token: write
     runs-on: ubuntu-latest
     environment:
       name: github-pages

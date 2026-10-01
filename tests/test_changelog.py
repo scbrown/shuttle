@@ -44,6 +44,12 @@ class ChangelogTest(unittest.TestCase):
         # "1.1" must not match the "1.1.0" section.
         self.assertIsNone(cc.section(SAMPLE, "1.1"))
 
+    def test_an_empty_section_is_empty_for_both_ci_and_notes(self):
+        empty = "## [2.0.0] - 2026-02-01\n\n## [1.0.0] - 2026-01-01\n\n- first\n"
+        # Present but empty: CI mode must refuse it, as --notes does at tag time.
+        self.assertEqual(cc.section(empty, "2.0.0"), "")
+        self.assertFalse(cc.section(empty, "2.0.0"))
+
     def test_the_repo_changelog_covers_the_package_version(self):
         changelog = (ROOT / "CHANGELOG.md").read_text()
         self.assertTrue(cc.section(changelog, cc.package_version()))

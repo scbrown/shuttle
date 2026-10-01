@@ -55,10 +55,12 @@ def main(argv: list[str]) -> int:
         print(__doc__, file=sys.stderr)
         return 2
     version = package_version()
-    if section(changelog, version) is None:
+    # The same test --notes applies at tag time: an EMPTY section fails here,
+    # on the PR, instead of after the version is already on main.
+    if not section(changelog, version):
         print(
-            f"CHANGELOG.md has no '## [{version}]' section for shuttle/__init__.py's "
-            f"version. Move the Unreleased entries under it.",
+            f"CHANGELOG.md has no non-empty '## [{version}]' section for "
+            f"shuttle/__init__.py's version. Move the Unreleased entries under it.",
             file=sys.stderr,
         )
         return 1
