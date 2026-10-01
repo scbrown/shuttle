@@ -28,6 +28,12 @@ class Transition:
     step: str
     from_state: str
     to_state: str
+    # A step a seeds work item performs (contract C2, aegis-w3k75d.4): entering
+    # `from_state` creates the seed, and its close advances the run. `seed`
+    # holds {"title": str, "labels": [str]}; `on_abandon` names the step taken
+    # when the seed closes with any outcome other than done.
+    seed: dict | None = None
+    on_abandon: str | None = None
 
 
 @dataclass(frozen=True)
@@ -97,7 +103,13 @@ def parse_definition(raw: dict) -> Definition:
     seen: set[tuple[str, str]] = set()
     for t in raw_ts:
         try:
-            tr = Transition(step=t["step"], from_state=t["from"], to_state=t["to"])
+            tr = Transition(
+                step=t["step"],
+                from_state=t["from"],
+                to_state=t["to"],
+                seed=_parse_seed(name, t),
+                on_abandon=t.get("on_abandon"),
+            )
         except (KeyError, TypeError) as exc:
             raise WorkflowError(
                 f"definition '{name}': every transition needs step/from/to ({t!r})"
@@ -116,12 +128,54 @@ def parse_definition(raw: dict) -> Definition:
             )
         transitions.append(tr)
 
+    for tr in transitions:
+        if tr.on_abandon is None:
+            continue
+        if tr.seed is None:
+            raise WorkflowError(
+                f"definition '{name}': step '{tr.step}' declares on_abandon but no "
+                f"seed — only a seed's close can be abandoned"
+            )
+        alternatives = {
+            t.step for t in transitions if t.from_state == tr.from_state and t.step != tr.step
+        }
+        if tr.on_abandon not in alternatives:
+            raise WorkflowError(
+                f"definition '{name}': step '{tr.step}' on_abandon '{tr.on_abandon}' is "
+                f"not another step legal from '{tr.from_state}'. Legal: {sorted(alternatives)}"
+            )
+
     return Definition(
         name=name,
         initial=initial,
         terminal=tuple(terminal),
         transitions=tuple(transitions),
     )
+
+
+def _parse_seed(name: str, raw: dict) -> dict | None:
+    """A transition's `seed` declaration, validated, or None."""
+    seed = raw.get("seed")
+    if seed is None:
+        return None
+    if not isinstance(seed, dict) or not isinstance(seed.get("title"), str) or not seed["title"]:
+        raise WorkflowError(
+            f"definition '{name}': step '{raw.get('step')}' seed needs a non-empty 'title'"
+        )
+    labels = seed.get("labels", [])
+    if not isinstance(labels, list) or not all(isinstance(x, str) for x in labels):
+        raise WorkflowError(
+            f"definition '{name}': step '{raw.get('step')}' seed 'labels' must be a list of strings"
+        )
+    return {"title": seed["title"], "labels": list(labels)}
+
+
+def entries(defn: Definition, events: list[Event], state: str) -> int:
+    """How many times a run has ENTERED `state`: the initial state counts as
+    one entry, and so does every event that lands on it. A seed is keyed by
+    this number (seeds' --visit), so re-entering a step's state mints a new
+    seed instead of finding the one already closed (contract A5)."""
+    return (1 if defn.initial == state else 0) + sum(1 for e in events if e.to_state == state)
 
 
 def validate_advance(defn: Definition, current: str, step: str) -> str:

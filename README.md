@@ -82,9 +82,37 @@ shuttle freeze-window 2026-07           # archive a completed window
 | `shuttle/quipu_client.py` | windowed writes ride `/knot`'s STRICT `graph` lane; a SHACL refusal is a refusal, never a silent 200 |
 | `shuttle/windows.py` | `{ns}/window/shuttle/runs/{YYYY-MM}` graphs + the `urn:shuttle:dataset:open` dataset |
 | `shuttle/export.py` | log → signed Turtle → idempotent `/episode` batches |
+| `shuttle/seeds.py` | seed steps: a [seeds](https://github.com/scbrown/seeds) work item performs the step, `reconcile` advances the run when it closes |
 | `shuttle/cli.py` | the whole v1 surface |
 
 Design: [docs/design/shuttle.md](docs/design/shuttle.md).
+
+## Seed steps
+
+A transition can be performed by a [seeds](https://github.com/scbrown/seeds)
+work item instead of by hand:
+
+```json
+{"step": "review", "from": "open", "to": "reviewed",
+ "seed": {"title": "Review the change", "labels": ["review"]},
+ "on_abandon": "reject"}
+```
+
+`shuttle reconcile --agent <you>` (on a timer, or by hand) does two things for
+every open run:
+
+- For each seed step legal from the run's state, it runs `sd create
+  --workflow-run <run> --step <step> --visit <n>`. seeds derives the id from
+  that key, so repeating the create returns the same seed. A run that re-enters
+  the state gets a new visit and a new seed.
+- It reads the seed with `sd show --json`. Outcome `done` advances the run
+  through the step, signed, with the seed id, outcome and close time recorded
+  as evidence. Any other outcome takes `on_abandon`. With no `on_abandon` the
+  run is FLAGGED (exit 1) and never advanced silently.
+
+seeds knows nothing about workflows beyond the link field. A missed tick costs
+one tick, not a stuck run. `SHUTTLE_SD` names the `sd` binary; where seeds
+stores its work is sd's own configuration.
 
 ## What runs today
 

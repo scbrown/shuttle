@@ -14,6 +14,8 @@ is why `shuttle export` belongs at the end of every session that wrote.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -143,3 +145,15 @@ def advance_watermark(count: int, root: Path | None = None) -> None:
     tmp = _watermark_path(root).with_suffix(".json.tmp")
     tmp.write_text(json.dumps({"exported": count}))
     tmp.replace(_watermark_path(root))
+
+
+@contextlib.contextmanager
+def locked(root: Path | None = None):
+    """Hold the state dir's exclusive lock. Two reconcilers folding the same
+    run and both appending its advance would write an event whose from-state
+    the fold has already left: a corrupt log. One holder at a time."""
+    root = root or state_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / "reconcile.lock").open("w") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
